@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>投資研究儀表板（教學版）</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3"></script>
+  <style>
+    :root { --bg:#0b1020; --card:#121a33; --text:#e9eefb; --muted:#9fb0d9; --ok:#39d98a; --warn:#ffb020; --bad:#ff5c7c; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family: Inter, "Noto Sans TC", system-ui, sans-serif; background:linear-gradient(135deg,#091026,#10193b); color:var(--text); }
+    .wrap { max-width:1100px; margin:24px auto; padding:0 16px 40px; }
+    h1 { margin-bottom:8px; }
+    .muted { color:var(--muted); }
+    .grid { display:grid; gap:14px; grid-template-columns: repeat(auto-fit,minmax(280px,1fr)); }
+    .card { background:var(--card); border:1px solid rgba(255,255,255,.08); border-radius:14px; padding:14px; box-shadow:0 8px 22px rgba(0,0,0,.25); }
+    label { display:block; font-size:14px; margin-bottom:6px; color:#cbd8ff; }
+    input, select, button, textarea { width:100%; border-radius:10px; border:1px solid rgba(255,255,255,.2); background:#0d1530; color:var(--text); padding:9px 10px; }
+    textarea { min-height:130px; }
+    button { cursor:pointer; background:#2b74ff; border:none; font-weight:700; }
+    button.secondary { background:#2a355d; }
+    .row { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    .kpi { font-size:14px; margin:6px 0; }
+    .kpi b { font-size:20px; }
+    .ok { color:var(--ok); } .warn { color:var(--warn); } .bad { color:var(--bad); }
+    .small { font-size:12px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>投資研究儀表板（教學與決策輔助）</h1>
+    <p class="muted">此工具僅供研究教育用途，不保證報酬。你可以輸入公司名或代碼，結合宏觀、估值、技術指標與資金配置，建立可調整的判斷流程。</p>
+
+    <div class="grid">
+      <section class="card">
+        <h3>1) 查詢標的</h3>
+        <label>公司 / 代碼（例：聯發科、2454.TW、AAPL）</label>
+        <input id="symbolInput" value="聯發科" />
+        <div class="row" style="margin-top:8px;">
+          <button id="loadBtn">載入價格資料</button>
+          <button id="sampleBtn" class="secondary">載入示範（聯發科）</button>
+        </div>
+        <p class="small muted">若自動抓取失敗，可用「示範」模式先練習流程。</p>
+
+        <h4>宏觀假設（可調）</h4>
+        <label>通膨率（%）</label><input id="inflation" type="number" step="0.1" value="2.3" />
+        <label>無風險利率（%）</label><input id="rf" type="number" step="0.1" value="4.3" />
+        <label>預期市場風險溢酬（%）</label><input id="erp" type="number" step="0.1" value="5.0" />
+        <label>個人風險承受（1保守-5積極）</label><input id="risk" type="range" min="1" max="5" value="3" oninput="riskOut.textContent=this.value" /><div class="small">目前：<span id="riskOut">3</span></div>
+      </section>
+
+      <section class="card">
+        <h3>2) 財報/估值假設</h3>
+        <label>EPS（近12月）</label><input id="eps" type="number" step="0.01" value="42" />
+        <label>未來5年年化成長率 g（%）</label><input id="growth" type="number" step="0.1" value="9" />
+        <label>折現率 r（%）</label><input id="discount" type="number" step="0.1" value="11" />
+        <label>目標本益比（Terminal P/E）</label><input id="terminalPe" type="number" step="0.1" value="18" />
+        <button id="valueBtn" style="margin-top:8px;">計算便宜 / 合理 / 昂貴價</button>
+        <div id="valueOutput" class="small" style="margin-top:8px;"></div>
+      </section>
+
+      <section class="card" style="grid-column:1/-1;">
+        <h3>3) 價格走勢 + 技術分析</h3>
+        <canvas id="priceChart" height="95"></canvas>
+        <div class="row" style="margin-top:8px;">
+          <div id="techOutput" class="small"></div>
+          <div id="signalOutput" class="small"></div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h3>4) 行業與宏觀解讀</h3>
+        <textarea id="macroText" placeholder="可貼上你對產業循環、匯率、利率、政策風險的觀察，系統會整理成投資要點。"></textarea>
+        <button id="macroBtn" style="margin-top:8px;">生成重點摘要</button>
+        <div id="macroOutput" class="small" style="margin-top:8px;"></div>
+      </section>
+
+      <section class="card">
+        <h3>5) 資金配置建議（長期）</h3>
+        <label>可投資資金（USD）</label><input id="capital" type="number" value="100000" />
+        <label>投資期限（年）</label><input id="horizon" type="number" value="5" />
+        <button id="allocBtn" style="margin-top:8px;">生成配置</button>
+        <div id="allocOutput" class="small" style="margin-top:8px;"></div>
+      </section>
+    </div>
+  </div>
+
+<script>
+const mapSymbol = (input) => {
+  const s = input.trim().toUpperCase();
+  if (s === "聯發科" || s === "2454" || s === "2454.TW") return "2454.TW";
+  return s;
+};
+
+const format = n => Number(n).toLocaleString(undefined,{maximumFractionDigits:2});
+let chart, closes = [], dates = [];
+
+function sma(arr, p){ return arr.map((_,i)=> i<p-1?null: arr.slice(i-p+1,i+1).reduce((a,b)=>a+b,0)/p); }
+function ema(arr, p){
+  const k = 2/(p+1); let out=[]; let prev=arr[0];
+  for(let i=0;i<arr.length;i++){ prev = i===0?arr[i]:arr[i]*k + prev*(1-k); out.push(prev); }
+  return out;
+}
+function rsi(arr, p=14){
+  if(arr.length<=p) return null;
+  let gains=0, losses=0;
+  for(let i=1;i<=p;i++){ const d=arr[i]-arr[i-1]; if(d>=0) gains+=d; else losses-=d; }
+  gains/=p; losses/=p;
+  for(let i=p+1;i<arr.length;i++){
+    const d=arr[i]-arr[i-1];
+    gains=(gains*(p-1)+(d>0?d:0))/p;
+    losses=(losses*(p-1)+(d<0?-d:0))/p;
+  }
+  if(losses===0) return 100;
+  const rs = gains/losses;
+  return 100 - (100/(1+rs));
+}
+
+function renderChart(){
+  if (chart) chart.destroy();
+  const s20=sma(closes,20), s50=sma(closes,50);
+  chart = new Chart(document.getElementById('priceChart'), {
+    type:'line',
+    data:{labels:dates,datasets:[
+      {label:'Close',data:closes,borderColor:'#84a9ff',pointRadius:0,borderWidth:1.4},
+      {label:'SMA20',data:s20,borderColor:'#39d98a',pointRadius:0,borderWidth:1.2},
+      {label:'SMA50',data:s50,borderColor:'#ffb020',pointRadius:0,borderWidth:1.2}
+    ]},
+    options:{plugins:{legend:{labels:{color:'#d9e3ff'}}},scales:{x:{ticks:{color:'#9fb0d9'}},y:{ticks:{color:'#9fb0d9'}}}}
+  });
+
+  const last = closes[closes.length-1], last20=s20[s20.length-1], last50=s50[s50.length-1];
+  const r = rsi(closes);
+  const ema12=ema(closes,12), ema26=ema(closes,26), macd=ema12.map((v,i)=>v-ema26[i]);
+  const signal=ema(macd,9);
+  const macdNow = macd[macd.length-1], sigNow=signal[signal.length-1];
+
+  document.getElementById('techOutput').innerHTML = `
+    <div class='kpi'>現價: <b>${format(last)}</b></div>
+    <div class='kpi'>SMA20: ${format(last20)} / SMA50: ${format(last50)}</div>
+    <div class='kpi'>RSI(14): ${format(r)}</div>
+    <div class='kpi'>MACD: ${format(macdNow)} vs Signal ${format(sigNow)}</div>`;
+
+  const trend = (last>last20 && last20>last50) ? "多頭排列" : (last<last20 && last20<last50 ? "空頭排列" : "盤整/轉折");
+  const rsiText = r>70?"短線過熱":(r<30?"可能超賣":"中性");
+  const macdText = macdNow>sigNow?"動能偏多":"動能偏弱";
+  document.getElementById('signalOutput').innerHTML = `
+    <div class='kpi'>技術面判讀: <b>${trend}</b></div>
+    <div class='kpi'>RSI訊號: ${rsiText}</div>
+    <div class='kpi'>MACD訊號: ${macdText}</div>
+    <div class='small muted'>提醒：技術分析僅描述機率，不保證未來。</div>`;
+}
+
+async function fetchStooq(symbol){
+  const stooq = `https://stooq.com/q/d/l/?s=${encodeURIComponent(symbol.toLowerCase())}&i=d`;
+  const url = `https://api.allorigins.win/raw?url=${encodeURIComponent(stooq)}`;
+  const txt = await (await fetch(url)).text();
+  const lines = txt.trim().split('\n').slice(1).filter(Boolean);
+  const parsed = lines.map(l=>l.split(','));
+  return {
+    d: parsed.map(v=>v[0]),
+    c: parsed.map(v=>Number(v[4])).filter(n=>Number.isFinite(n))
+  };
+}
+
+function loadSample(){
+  const n=220; const base=920; dates=[]; closes=[];
+  for(let i=0;i<n;i++){
+    const d = new Date(Date.now()-(n-i)*86400000);
+    dates.push(d.toISOString().slice(0,10));
+    const val = base + i*0.7 + Math.sin(i/8)*30 + (Math.random()-0.5)*20;
+    closes.push(Math.max(200,val));
+  }
+  renderChart();
+}
+
+document.getElementById('loadBtn').onclick = async ()=>{
+  const mapped = mapSymbol(document.getElementById('symbolInput').value);
+  try {
+    const data = await fetchStooq(mapped.replace('.TW','.TW'));
+    dates = data.d; closes = data.c;
+    if (closes.length < 60) throw new Error('資料不足');
+    renderChart();
+  } catch (e){
+    alert('抓取失敗，已切換示範資料。可改輸入如 2454.TW 或 AAPL 再試。');
+    loadSample();
+  }
+};
+document.getElementById('sampleBtn').onclick = loadSample;
+
+// Valuation
+function calcValuation(){
+  const eps=+epsEl.value, g=+growthEl.value/100, r=+discountEl.value/100, pe=+terminalPeEl.value;
+  const futureEPS = eps * Math.pow(1+g,5);
+  const fair = (futureEPS*pe)/Math.pow(1+r,5);
+  const cheap = fair*0.8, expensive=fair*1.2;
+  valueOutput.innerHTML = `
+    <div class='kpi'>便宜價（-20%）: <b class='ok'>${format(cheap)}</b></div>
+    <div class='kpi'>合理價: <b>${format(fair)}</b></div>
+    <div class='kpi'>昂貴價（+20%）: <b class='bad'>${format(expensive)}</b></div>
+    <div class='small muted'>模型：5年 EPS 成長 + Terminal P/E 折現。請搭配現金流、競爭優勢與景氣循環校正。</div>`;
+}
+const epsEl = document.getElementById('eps');
+const growthEl = document.getElementById('growth');
+const discountEl = document.getElementById('discount');
+const terminalPeEl = document.getElementById('terminalPe');
+const valueOutput = document.getElementById('valueOutput');
+document.getElementById('valueBtn').onclick = calcValuation;
+
+// Macro summary
+document.getElementById('macroBtn').onclick = ()=>{
+  const inflation=+document.getElementById('inflation').value;
+  const rf=+document.getElementById('rf').value;
+  const erp=+document.getElementById('erp').value;
+  const txt=document.getElementById('macroText').value.trim();
+  const beta = 1.1;
+  const cost = rf + beta*erp;
+  const inflationTag = inflation>3?"通膨壓力偏高":"通膨相對可控";
+  macroOutput.innerHTML = `
+  <ul>
+    <li>${inflationTag}；名目折現率應保留風險墊。</li>
+    <li>以 CAPM 粗估股權成本約 <b>${format(cost)}%</b>（假設 Beta=${beta}）。</li>
+    <li>利率與美元走勢會影響半導體估值倍數，需動態更新。</li>
+    <li>你輸入的宏觀觀察：${txt || '（未填）'}。</li>
+  </ul>`;
+};
+
+// Allocation
+document.getElementById('allocBtn').onclick = ()=>{
+  const cap=+document.getElementById('capital').value;
+  const risk=+document.getElementById('risk').value;
+  const h=+document.getElementById('horizon').value;
+  const stock = Math.min(70, 25 + risk*10 + (h>=5?5:0));
+  const bond = 100-stock-10;
+  const cash = 10;
+  allocOutput.innerHTML = `
+    <div class='kpi'>建議配置（示意）：</div>
+    <ul>
+      <li>核心股權資產：${stock}%（約 ${format(cap*stock/100)}）</li>
+      <li>中短天期債券/貨幣市場：${bond}%（約 ${format(cap*bond/100)}）</li>
+      <li>現金與避險部位：${cash}%（約 ${format(cap*cash/100)}）</li>
+    </ul>
+    <div class='small muted'>先求活下來再追求高報酬：單一股票建議上限 10-15%。</div>`;
+};
+
+loadSample();
+calcValuation();
+</script>
+</body>
+</html>
